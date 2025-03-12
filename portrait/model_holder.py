@@ -4,7 +4,7 @@ import insightface
 from insightface.app import FaceAnalysis
 from .utils.face_process_utils import Face_Skin
 from .utils.psgan_utils import PSGAN_Inference
-
+import folder_paths
 from .config import *
 
 retinaface_detection = None
@@ -18,10 +18,14 @@ psgan_interface = None
 real_gan_sr = None
 face_recognition = None
 
+models_dir = folder_paths.models_dir
+model_path_1 = os.path.join(models_dir, "facechain-colab/hub/damo/cv_resnet50_face-detection_retinaface")
+model_path_2 = os.path.join(models_dir, "facechain-colab/hub/damo/cv_unet_skin_retouching_torch")
+
 def get_retinaface_detection():
     global retinaface_detection
     if retinaface_detection is None:
-        retinaface_detection = pipeline(Tasks.face_detection, '/home/lisa/app/ComfyUI/models/facechain-colab/hub/damo/cv_resnet50_face-detection_retinaface', model_revision='v2.0.2')
+        retinaface_detection = pipeline(Tasks.face_detection, model=model_path_1, model_revision='v2.0.2')
     return retinaface_detection
 
 def get_image_face_fusion():
@@ -51,7 +55,8 @@ def get_face_skin():
 def get_skin_retouching():
     global skin_retouching
     if skin_retouching is None:
-        skin_retouching = pipeline('skin-retouching-torch', model='/home/lisa/app/ComfyUI/models/facechain-colab/hub/damo/cv_unet_skin_retouching_torch', model_revision='v1.0.2')
+        print(f"models dir is: {models_dir}\n model path is: {model_path_2}")
+        skin_retouching = pipeline('skin-retouching-torch', model=model_path_2, model_revision='v1.0.2') #model_path_2
     return skin_retouching
 
 def get_portrait_enhancement():
