@@ -21,7 +21,7 @@ face_recognition = None
 def get_retinaface_detection():
     global retinaface_detection
     if retinaface_detection is None:
-        retinaface_detection = pipeline(Tasks.face_detection, 'damo/cv_resnet50_face-detection_retinaface', model_revision='v2.0.2')
+        retinaface_detection = pipeline(Tasks.face_detection, '/home/lisa/app/ComfyUI/models/facechain-colab/hub/damo/cv_resnet50_face-detection_retinaface', model_revision='v2.0.2')
     return retinaface_detection
 
 def get_image_face_fusion():
@@ -51,7 +51,7 @@ def get_face_skin():
 def get_skin_retouching():
     global skin_retouching
     if skin_retouching is None:
-        skin_retouching = pipeline('skin-retouching-torch', model='/workspace/ComfyUI/models/facechain-colab/modelscope_modules/cv_unet_skin_retouching_torch', model_revision='v1.0.2')
+        skin_retouching = pipeline('skin-retouching-torch', model='/home/lisa/app/ComfyUI/models/facechain-colab/hub/damo/cv_unet_skin_retouching_torch', model_revision='v1.0.2')
     return skin_retouching
 
 def get_portrait_enhancement():
