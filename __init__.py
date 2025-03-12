@@ -10,7 +10,7 @@ from portrait.nodes import *
 
 # import pydevd_pycharm
 # pydevd_pycharm.settrace('49.7.62.197', port=10090, stdoutToServer=True, stderrToServer=True)
-
+"""
 def urldownload_progressbar(url, file_path):
     response = requests.get(url, stream=True)
     total_size = int(response.headers.get('content-length', 0))
@@ -31,7 +31,7 @@ for url, filename in zip(urls, filenames):
     print(f"开始下载: {url} 下载到 {filename}")
     os.makedirs(os.path.dirname(filename), exist_ok=True)
     urldownload_progressbar(url, filename)
-
+"""
 NODE_CLASS_MAPPINGS = {
     "PM_RetinaFace": RetinaFacePM,
     "PM_FaceFusion": FaceFusionPM,
