@@ -5,6 +5,7 @@ from insightface.app import FaceAnalysis
 from .utils.face_process_utils import Face_Skin
 from .utils.psgan_utils import PSGAN_Inference
 import folder_paths
+import os
 from .config import *
 
 retinaface_detection = None
