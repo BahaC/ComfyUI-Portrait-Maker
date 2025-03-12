@@ -51,7 +51,7 @@ def get_face_skin():
 def get_skin_retouching():
     global skin_retouching
     if skin_retouching is None:
-        skin_retouching = pipeline('skin-retouching-torch', model='damo/cv_unet_skin_retouching_torch', model_revision='v1.0.2')
+        skin_retouching = pipeline('skin-retouching-torch', model='/workspace/ComfyUI/models', model_revision='v1.0.2')
     return skin_retouching
 
 def get_portrait_enhancement():
