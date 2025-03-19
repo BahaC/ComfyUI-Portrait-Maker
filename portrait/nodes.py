@@ -5,6 +5,7 @@ from modelscope.outputs import OutputKeys
 from .utils.face_process_utils import call_face_crop, color_transfer, Face_Skin
 from .utils.img_utils import img_to_tensor, tensor_to_img, tensor_to_np, np_to_tensor, np_to_mask, img_to_mask, img_to_np
 from .model_holder import *
+from .model_holder import load_skin_retouching_direct_models, get_skin_models
 
 # import pydevd_pycharm
 #
@@ -254,21 +255,332 @@ class MaskDilateErodePM:
         out_mask = Image.fromarray(np.uint8(cv2.dilate(tensor_to_np(mask), np.ones((96, 96), np.uint8), iterations=1) - cv2.erode(tensor_to_np(mask), np.ones((48, 48), np.uint8), iterations=1)))
         return (img_to_mask(out_mask),)
 
-class SkinRetouchingPM:
+class SkinRetouchingLoaderPM:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "device": (["cuda", "cpu"], {"default": "cuda"})
+        }}
 
+    RETURN_TYPES = ("SKIN_RETOUCHING_MODEL",)
+    FUNCTION = "load_skin_retouching_model"
+    CATEGORY = "protrait/model"
+
+    def load_skin_retouching_model(self, device="cuda"):
+        """Load all required models for skin retouching directly"""
+        import time
+        print("Loading skin retouching models directly...")
+        start_time = time.time()
+        
+        # Load all the models directly
+        models = load_skin_retouching_direct_models(device)
+        
+        print(f"Skin retouching models loaded in {time.time() - start_time:.2f} seconds")
+        return (models,)
+
+class SkinRetouchingInferencePM:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"image": ("IMAGE",)}
+                    {"image": ("IMAGE",),
+                     "model": ("SKIN_RETOUCHING_MODEL",),
+                     "degree": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1}),
+                     "smooth_border": ("BOOLEAN", {"default": True}),
+                    }
                 }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "skin_retouching_pass"
+    FUNCTION = "skin_retouching_inference"
     CATEGORY = "protrait/model"
 
-    def skin_retouching_pass(self, image):
-        output_image = cv2.cvtColor(get_skin_retouching()(tensor_to_img(image))[OutputKeys.OUTPUT_IMG], cv2.COLOR_BGR2RGB)
-        return (np_to_tensor(output_image),)
+    def skin_retouching_inference(self, image, model, degree=1.0, smooth_border=True):
+        """Perform skin retouching using the loaded models directly"""
+        import torch
+        import torch.nn.functional as F
+        from modelscope.models.cv.skin_retouching.utils import get_roi_without_padding, roi_to_tensor
+        from modelscope.models.cv.skin_retouching.utils import get_crop_bbox, preprocess_roi, smooth_border_mg
+        from modelscope.outputs import OutputKeys
+        import time
+        
+        # Extract models from the model dictionary
+        generator = model["generator"]
+        inpainting_net = model["inpainting_net"]
+        detection_net = model["detection_net"]
+        face_detector = model["face_detector"]
+        diffuse_mask = model["diffuse_mask"]
+        device = model.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        
+        # Convert input image to numpy array
+        start_time = time.time()
+        input_img = tensor_to_img(image)
+        
+        # Check input image color channels
+        input_rgb_sample = np.array(input_img)[0:3, 0:3, :]
+        print(f"Input image color sample (RGB from PIL): {input_rgb_sample}")
+        
+        rgb_image = np.array(input_img)
+        print(f"Input image shape: {rgb_image.shape}")
+        print(f"Input value range: min={np.min(rgb_image)}, max={np.max(rgb_image)}")
+        
+        print(f"Image conversion took {time.time() - start_time:.4f} seconds")
+        
+        # Create output tensor
+        start_time = time.time()
+        output_pred = torch.from_numpy(rgb_image).to(device)
+        
+        # Detect faces
+        detect_start = time.time()
+        det_results = face_detector(rgb_image)
+        print(f"Face detection took {time.time() - detect_start:.4f} seconds")
+        
+        # Convert detection results to standard format
+        results = []
+        for i in range(len(det_results['scores'])):
+            info_dict = {}
+            try:
+                # Get bounding box
+                info_dict['bbox'] = np.array(det_results['boxes'][i]).astype(np.int32).tolist()
+                info_dict['score'] = det_results['scores'][i]
+                
+                # Handle keypoints (landmarks) with proper error checking
+                if 'keypoints' in det_results and len(det_results['keypoints']) > i:
+                    keypoints = det_results['keypoints'][i]
+                    # Check if keypoints are already in the right format
+                    if isinstance(keypoints, list) and len(keypoints) == 5 and all(len(point) == 2 for point in keypoints):
+                        info_dict['landmarks'] = keypoints
+                    else:
+                        # Try to convert and reshape if needed
+                        info_dict['landmarks'] = np.array(keypoints).astype(np.int32).reshape(5, 2).tolist()
+                else:
+                    # Generate default landmarks if none available
+                    # Create reasonable positions from the bounding box
+                    x1, y1, x2, y2 = info_dict['bbox']
+                    w, h = x2 - x1, y2 - y1
+                    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                    
+                    # Simple default facial landmarks positioning
+                    left_eye = [int(x1 + w * 0.3), int(y1 + h * 0.3)]
+                    right_eye = [int(x2 - w * 0.3), int(y1 + h * 0.3)]
+                    nose = [center_x, int(y1 + h * 0.5)]
+                    left_mouth = [int(x1 + w * 0.3), int(y2 - h * 0.3)]
+                    right_mouth = [int(x2 - w * 0.3), int(y2 - h * 0.3)]
+                    
+                    info_dict['landmarks'] = [left_eye, right_eye, nose, left_mouth, right_mouth]
+                
+                results.append(info_dict)
+            except Exception as e:
+                print(f"Error processing detection result {i}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Get crop boxes for all faces
+        crop_bboxes = get_crop_bbox(results)
+        
+        # Check if faces were found
+        face_num = len(crop_bboxes)
+        if face_num == 0:
+            print("No faces detected in the image!")
+            return (image,)
+            
+        print(f"Found {face_num} faces")
+        
+        with torch.no_grad():
+            # Process each face
+            for face_idx, bbox in enumerate(crop_bboxes):
+                face_start = time.time()
+                
+                # Get region of interest
+                roi, expand, crop_tblr = get_roi_without_padding(rgb_image, bbox)
+                
+                # Debug color space
+                print(f"ROI min/max values before conversion: {np.min(roi)}/{np.max(roi)}")
+                roi_color_sample = roi[0:3, 0:3, :] if roi.shape[2] >= 3 else roi[0:3, 0:3]
+                print(f"ROI color sample: {roi_color_sample}")
+                
+                # Original comment indicates BGR->RGB conversion, but we need to check if this is necessary
+                # based on how the input was processed
+                roi = roi_to_tensor(roi)
+                roi = roi.to(device)
+                roi = preprocess_roi(roi)
+                
+                # Apply local retouching if model is available
+                if inpainting_net is not None and detection_net is not None:
+                    local_start = time.time()
+                    roi = self.retouch_local(roi, detection_net, inpainting_net)
+                    print(f"Local retouching for face {face_idx} took {time.time() - local_start:.4f} seconds")
+                
+                # Apply main retouching
+                roi_start = time.time()
+                roi_output = self.predict_roi(roi, generator, diffuse_mask, degree, smooth_border, input_size=512)
+                print(f"ROI prediction for face {face_idx} took {time.time() - roi_start:.4f} seconds")
+                
+                # Place result back into output image
+                roi_pred = roi_output['pred']
+                output_pred[crop_tblr[0]:crop_tblr[1], crop_tblr[2]:crop_tblr[3]] = roi_pred
+                
+                print(f"Face {face_idx} processing took {time.time() - face_start:.4f} seconds")
+        
+        # Convert to numpy array
+        if not isinstance(output_pred, np.ndarray):
+            output_pred = output_pred.cpu().numpy()
+        
+        # Debug output color
+        output_sample = output_pred[0:3, 0:3, :] if len(output_pred.shape) >= 3 and output_pred.shape[2] >= 3 else output_pred[0:3, 0:3]
+        print(f"Output value range: min={np.min(output_pred)}, max={np.max(output_pred)}")
+        print(f"Output color sample: {output_sample}")
+        
+        print(f"Total processing took {time.time() - start_time:.4f} seconds")
+        
+        # Use np_to_tensor to properly convert back to tensor in the same color space
+        result = np_to_tensor(output_pred)
+        
+        # Add final check of tensor values
+        tensor_sample = result[0, 0:3, 0:3, :].cpu().numpy()
+        print(f"Final tensor color sample: {tensor_sample}")
+        
+        # Return the retouched image
+        return (result,)
+    
+    def retouch_local(self, image, detection_net, inpainting_net, patch_size=512):
+        """Apply local retouching to the image"""
+        import torch
+        import torch.nn.functional as F
+        from modelscope.models.cv.skin_retouching.utils import patch_partition_overlap, patch_aggregation_overlap
+        
+        with torch.no_grad():
+            sub_H, sub_W = image.shape[2:]
+            
+            # Resize image for detection and generate mask
+            sub_image_standard = F.interpolate(
+                image, size=(768, 768), mode='bilinear', align_corners=True)
+            sub_mask_pred = torch.sigmoid(detection_net(sub_image_standard))
+            sub_mask_pred = F.interpolate(
+                sub_mask_pred, size=(sub_H, sub_W), mode='nearest')
+            
+            # Process mask with thresholds
+            sub_mask_pred_hard_low = (sub_mask_pred >= 0.35).float()
+            sub_mask_pred_hard_high = (sub_mask_pred >= 0.5).float()
+            sub_mask_pred = sub_mask_pred * (1 - sub_mask_pred_hard_high) + sub_mask_pred_hard_high
+            sub_mask_pred = sub_mask_pred * sub_mask_pred_hard_low
+            sub_mask_pred = 1 - sub_mask_pred
+            
+            # Standardize image sizes to multiples of patch_size
+            sub_H_standard = sub_H if sub_H % patch_size == 0 else (sub_H // patch_size + 1) * patch_size
+            sub_W_standard = sub_W if sub_W % patch_size == 0 else (sub_W // patch_size + 1) * patch_size
+            
+            # Pad images and masks
+            sub_image_padding = F.pad(
+                image,
+                pad=(0, sub_W_standard - sub_W, 0, sub_H_standard - sub_H, 0, 0),
+                mode='constant',
+                value=0)
+            sub_mask_pred_padding = F.pad(
+                sub_mask_pred,
+                pad=(0, sub_W_standard - sub_W, 0, sub_H_standard - sub_H, 0, 0),
+                mode='constant',
+                value=0)
+            
+            # Split into patches
+            sub_image_padding = patch_partition_overlap(sub_image_padding, p1=patch_size, p2=patch_size)
+            sub_mask_pred_padding = patch_partition_overlap(sub_mask_pred_padding, p1=patch_size, p2=patch_size)
+            B_padding, C_padding, _, _ = sub_image_padding.size()
+            
+            # Process each patch
+            sub_comp_padding_list = []
+            for window_item in range(B_padding):
+                sub_image_padding_window = sub_image_padding[window_item:window_item + 1]
+                sub_mask_pred_padding_window = sub_mask_pred_padding[window_item:window_item + 1]
+                
+                # Apply mask to image
+                sub_input_image_padding_window = sub_image_padding_window * sub_mask_pred_padding_window
+                
+                # Apply inpainting
+                sub_output_padding_window = inpainting_net(
+                    sub_input_image_padding_window,
+                    sub_mask_pred_padding_window)
+                
+                # Combine original and inpainted areas
+                sub_comp_padding_window = sub_input_image_padding_window + (
+                    1 - sub_mask_pred_padding_window) * sub_output_padding_window
+                
+                sub_comp_padding_list.append(sub_comp_padding_window)
+            
+            # Combine all patches
+            sub_comp_padding = torch.cat(sub_comp_padding_list, dim=0)
+            sub_comp = patch_aggregation_overlap(
+                sub_comp_padding,
+                h=int(round(sub_H_standard / patch_size)),
+                w=int(round(sub_W_standard / patch_size)))[:, :, :sub_H, :sub_W]
+            
+            return sub_comp
+    
+    def predict_roi(self, roi, generator, diffuse_mask, degree=1.0, smooth_border=False, return_mg=False, input_size=512):
+        """Apply the main retouching to a region of interest"""
+        import torch
+        import torch.nn.functional as F
+        from modelscope.models.cv.skin_retouching.utils import smooth_border_mg
+        import numpy as np
+        
+        # Debug ROI input
+        roi_sample = roi[0, :, 0:3, 0:3].cpu().numpy()
+        print(f"ROI tensor input sample: {roi_sample}")
+        
+        with torch.no_grad():
+            # Resize ROI to standard size
+            image = F.interpolate(roi, (input_size, input_size), mode='bilinear')
+            
+            # Debug generator input
+            gen_input_sample = image[0, :, 0:3, 0:3].cpu().numpy()
+            print(f"Generator input sample: {gen_input_sample}")
+            
+            # Apply generator model
+            pred_mg = generator(image)  # value: 0~1
+            
+            # Debug generator output
+            gen_output_sample = pred_mg[0, :, 0:3, 0:3].cpu().numpy()
+            print(f"Generator output sample: {gen_output_sample}")
+            
+            pred_mg = (pred_mg - 0.5) * degree + 0.5
+            pred_mg = pred_mg.clamp(0.0, 1.0)
+            pred_mg = F.interpolate(pred_mg, roi.shape[2:], mode='bilinear')
+            pred_mg = pred_mg[0].permute(1, 2, 0)  # ndarray, (h, w, 1) or (h0, w0, 3)
+            
+            if len(pred_mg.shape) == 2:
+                pred_mg = pred_mg[..., None]
+            
+            # Apply border smoothing if requested
+            if smooth_border:
+                pred_mg = smooth_border_mg(diffuse_mask, pred_mg)
+            
+            # Convert ROI to normal range
+            image = (roi[0].permute(1, 2, 0) + 1.0) / 2
+            
+            # Debug before final blend
+            roi_final_sample = image[0:3, 0:3, :].cpu().numpy()
+            pred_mg_sample = pred_mg[0:3, 0:3, :].cpu().numpy()
+            print(f"ROI final sample: {roi_final_sample}")
+            print(f"Pred_mg sample: {pred_mg_sample}")
+            
+            # Apply the final retouching blend
+            pred = (1 - 2 * pred_mg) * image * image + 2 * pred_mg * image  # value: 0~1
+            
+            # Debug blended result
+            pred_sample = pred[0:3, 0:3, :].cpu().numpy()
+            print(f"Blended pred sample: {pred_sample}")
+            
+            # Convert to byte range
+            pred = (pred * 255.0).byte()  # ndarray, (h, w, 3), rgb
+            
+            # Debug final byte output
+            pred_byte_sample = pred[0:3, 0:3, :].cpu().numpy()
+            print(f"Final pred byte sample: {pred_byte_sample}")
+            
+            # Prepare output
+            output = {'pred': pred}
+            if return_mg:
+                output['pred_mg'] = pred_mg.cpu().numpy()
+            
+            return output
 
 class PortraitEnhancementPM:
 
