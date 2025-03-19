@@ -43,7 +43,7 @@ NODE_CLASS_MAPPINGS = {
     "PM_ColorTransfer": ColorTransferPM,
     "PM_FaceSkin": FaceSkinPM,
     "PM_MaskDilateErode": MaskDilateErodePM,
-    "PM_SkinRetouching": SkinRetouchingPM,
+    #"PM_SkinRetouching": SkinRetouchingPM,
     "PM_PortraitEnhancement": PortraitEnhancementPM,
     "PM_ImageScaleShort": ImageScaleShortPM,
     "PM_ImageResizeTarget": ImageResizeTargetPM,
@@ -53,6 +53,8 @@ NODE_CLASS_MAPPINGS = {
     "PM_SuperColorTransfer": SuperColorTransferPM,
     "PM_SuperMakeUpTransfer": SuperMakeUpTransferPM,
     "PM_Similarity": SimilarityPM,
+    "SkinRetouchingInferencePM": SkinRetouchingInferencePM,
+    "SkinRetouchingLoaderPM": SkinRetouchingLoaderPM,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "PM_RetinaFace": "RetinaFace PM",
@@ -65,7 +67,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PM_ColorTransfer": "ColorTransfer PM",
     "PM_FaceSkin": "FaceSkin PM",
     "PM_MaskDilateErode": "MaskDilateErode PM",
-    "PM_SkinRetouching": "SkinRetouching PM",
+    #"PM_SkinRetouching": "SkinRetouching PM",
     "PM_PortraitEnhancement": "PortraitEnhancement PM",
     "PM_ImageScaleShort": "ImageScaleShort PM",
     "PM_ImageResizeTarget": "ImageResizeTarget PM",
@@ -75,7 +77,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PM_SuperColorTransfer": "SuperColorTransfer PM",
     "PM_SuperMakeUpTransfer": "SuperMakeUpTransfer PM",
     "PM_Similarity": "Similarity PM",
-
+    "SkinRetouchingInferencePM": "👻 LisaSkinRetouchingInference",
+    "SkinRetouchingLoaderPM": "👻 LisaSkinRetouchingLoader",
 }
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
